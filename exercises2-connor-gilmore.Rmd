@@ -1,0 +1,516 @@
+---
+title: "exercises2-connor-gilmore"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(ggforce)
+library(tidyr)
+library(quantmod)
+library(mosaic)
+library(foreach)
+```
+
+# Visual story telling part 1: green buildings 
+
+```{r, echo=FALSE, include=FALSE}
+gb_data <- read.csv('greenbuildings.csv')
+```
+
+```{r, echo=FALSE, include=FALSE}
+#for each cluster, compare green-building rent to median of non-green buildings rent
+rent_comp <- gb_data %>%
+  select(CS_PropertyID, cluster, cluster_rent, Rent, green_rating) %>%
+  group_by(cluster) %>% 
+  filter(green_rating == 1) %>%
+  mutate(green_comp = ifelse(Rent > cluster_rent, 'Green Building Rent Is Higher Than Cluster', 
+                             'Green Building Rent Is Lower Than Cluster'))
+```
+
+```{r, echo=FALSE, include=FALSE}
+#for each cluster, compare green-building rent to median of non-green buildings rent
+non_gb_med <- gb_data %>%
+  select(CS_PropertyID, cluster, cluster_rent, Rent, green_rating) %>%
+  group_by(cluster) %>%
+  filter(green_rating == 0) %>%
+  mutate(comp_rent = median(Rent))
+```
+
+```{r, echo=FALSE, include=FALSE}
+#for each cluster, compare green-building rent to median of non-green buildings rent
+new_gb_df <- rent_comp %>%
+  bind_rows(non_gb_med) %>%
+  mutate(comp_rent = ifelse(is.na(comp_rent), Rent, comp_rent)) %>%
+  arrange(cluster) %>%
+  select(cluster, green_rating, comp_rent) %>%
+  distinct(cluster, green_rating, comp_rent, .keep_all = TRUE)
+
+comp_rent_green <- new_gb_df %>% filter(green_rating == 1)
+comp_rent_nongreen <- new_gb_df %>% filter(green_rating == 0)
+comp_rent_df <- comp_rent_green %>%
+  left_join(comp_rent_nongreen, by='cluster', suffix=c('_green', '_non_green')) %>%
+  mutate(comp_result = ifelse(comp_rent_green > comp_rent_non_green, 'Green Building Rent Is Higher', 'Non-Green Building Rent Is Higher')) %>%
+  select(cluster, comp_result) %>%
+  filter(is.na(comp_result) == FALSE)
+```
+
+
+When looking at comparing rent of green buildings to non-green buildings, it is important to account for comparisons within cluster so that we adjust for relevant information that locality may play in rent prices. 
+
+First, we look to see how green buildings' rents compare to non-green buildings' rents. Adjusting for cluster information, we that for the majority of clusters (67% of them), the green buildings have higher rent than the median value of the non-green buildings within their respective cluster.  
+
+```{r, echo=FALSE}
+#for each cluster, compare green-building rent to non-green buildings rent
+ggplot(comp_rent_df, aes(comp_result, 
+                         fill=factor(ifelse(comp_result=="Green Building Rent Is Higher","Highlighted","Normal")))) +
+  geom_bar(stat='count') +
+  scale_fill_manual(name = "comp_result", values=c("green4","grey50")) +
+  labs(title="In 67% of Clusters, Green Buildings Have Higher Rent", 
+       subtitle="a comparison of rent w/in clusters, adjusting for possible confounding cluster information",
+       y='frequency', 
+       x='count of clusters where green or non-green building has higher rent') +
+  theme(legend.position = "none", 
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Change axis line
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold"))
+```
+
+However, the green building status is not the only thing that suggests higher rent. So, we turn to investigating other key factors that are confounding variables.  
+
+We may hypothesize that the number of stories may be influencing green-building rent to be higher, so we can control for this as a confounding variable by restricting our comparison groups (green buildings and non-green buildings) to the number of stories in the building we are developing, 15, which we see that green-building rent is still higher.
+
+```{r, echo=FALSE, include=FALSE}
+gb_data$green_rating_label <- ifelse(gb_data$green_rating == 1, 'green', 'non-green')
+```
+
+```{r, echo=FALSE, include=FALSE}
+med_green_15 <- gb_data %>%
+  filter(green_rating_label == 'green') %>%
+  filter(stories == 15)
+med_green_15_rent <- median(med_green_15$Rent)
+
+med_nongreen_15 <- gb_data %>%
+  filter(green_rating_label == 'non-green') %>%
+  filter(stories == 15)
+med_nongreen_15_rent <- median(med_nongreen_15$Rent)
+
+gb_data_15 <- gb_data %>%
+  filter(stories == 15)
+```
+
+```{r, echo=FALSE}
+#age
+ggplot(gb_data_15, aes(x=stories, y=Rent, 
+                       fill=factor(ifelse(green_rating_label=="green","Highlighted","Normal")))) +
+  geom_boxplot() +
+  scale_fill_manual(name = "green_rating_label", values=c("green4","grey50")) +
+  scale_x_continuous(breaks = c(14.8, 15.2), 
+                     labels = c("Green Buildings", "Non-Green Buildings")) + 
+  labs(title="Green Buildings With 15 Stories Have A Higher Median Rent", 
+       subtitle="a comparison of rent, adjusting for possible confounding information in the number of stories",
+       y='rent value', 
+       x='buildings with 15 stories') +
+  theme(legend.position = "none",
+      panel.background = element_blank(),
+      panel.border = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      # Change axis line
+      axis.line = element_line(colour = "black"), 
+      plot.title = element_text(face = "bold"),
+      #axis.text.x=element_blank(),
+      #axis.ticks.x=element_blank()
+      ) +
+  annotate(
+    geom = "curve", x = 14.9, y = 46, xend = 14.81, yend = 38, 
+    curvature = .3, arrow = arrow(length = unit(2, "mm"))) +
+  annotate(geom = "text", x = 14.91, y = 46.9, label = "Median Green Rent: $36.95", 
+           hjust = "left", color='green4', fontface=2) +
+  annotate(
+    geom = "curve", x = 15.16, y = 15, xend = 15.19, yend = 24, 
+    curvature = .3, arrow = arrow(length = unit(2, "mm"))) +
+  annotate(geom = "text", x = 14.91, y = 13, label = "Median Non-Green Rent: $24.36", 
+           hjust = "left", fontface=2)
+```
+
+
+Next, we check to make sure that the size of the building is not a confounding variable, by again restricting our comparison to buildings in a similar square footage range. Here, we start to see the initial analysis that green rent is higher come apart. 
+
+```{r, echo=FALSE, include=FALSE}
+gb_data_size <- gb_data %>%
+  filter(size >= 245000 & size <= 255000)
+gb_data_size_finer <- gb_data %>%
+  filter(size >= 249000 & size <= 251000)
+gb_data_size_g <- gb_data %>% 
+  filter(green_rating_label == 'green')
+gb_data_size_ng <- gb_data_size %>% 
+  filter(green_rating_label == 'non-green')
+gb_data_size_g_rent <- median(gb_data_size_g$Rent)
+gb_data_size_ng_rent <- median(gb_data_size_ng$Rent) 
+```
+
+```{r, echo=FALSE}
+#age
+ggplot(gb_data_size, aes(x=size, y=Rent, color=factor(green_rating_label))) +
+  geom_point() + 
+  scale_fill_manual(values=c("green4","grey50")) +
+  scale_color_manual(values=c("green4","grey50")) +
+  geom_smooth(method = 'lm', se = FALSE) +
+  labs(title="However, Adjusting For Similar Size, Green Buildings Have A Lower Rent", 
+       subtitle="a comparison of rent, adjusting for possible confounding information in the building size",
+       y='rent value', 
+       x='green and non-green buildings size - around 250k sqft (+/- 5k sqft)') +
+  theme(legend.position = "none",
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Change axis line
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold"))  +
+  annotate(
+    geom = "curve", x = 251000, y = 13.5, xend = 250400, yend = 26.5,
+    curvature = .3, color='green4', arrow = arrow(length = unit(2, "mm"))) +
+  annotate(geom = "text", x = 250000, y = 12, label = 'Median Green Rent Is $6.15 Lower', 
+           hjust = "left", color='green4', fontface=2)
+```
+
+```{r, echo=FALSE, include=FALSE}
+gb_data_age <- gb_data %>%
+  filter(leasing_rate >= 0.90) %>% 
+  filter(age < 40) %>% 
+  filter(renovated == 0) %>% 
+  filter(net == 0) %>% 
+  group_by(green_rating_label, age) %>% 
+  summarise(median_rent = median(Rent, na.rm = TRUE))
+
+gb_data_age_gb <- gb_data_age %>% 
+  filter(green_rating_label == 'green')
+
+gb_data_age_ngb <- gb_data_age %>% 
+  filter(green_rating_label == 'non-green')
+
+gb_data_age_comp <- gb_data_age_gb %>% 
+  left_join(gb_data_age_ngb, by='age', suffix=c('_green', '_non_green')) %>% 
+  mutate(green_comp = ifelse(median_rent_green > median_rent_non_green, 
+                             'green is higher', 'green is lower')) %>% 
+  filter(green_comp == 'green is higher')
+```
+
+Finally, we turn to the age, which is part of the analyst's calculation. I adjusted for two possible confounding variables: if the building had a renovation (a future cost and hit to profitability) and if the building has tenants pay utility costs (making the rent lower). I considered only buildings that did not have a renovation and whose tenants did not rent on a net contract basis. Here again, we see no conclusive evidence green buildings have a higher rent over time, or even half the time. 
+
+```{r, echo=FALSE}
+#age
+ggplot(gb_data_age, aes(x=age, y=median_rent, color=factor(green_rating_label))) + 
+  geom_point() + 
+  geom_line() + 
+  #geom_smooth(se=FALSE) + 
+  scale_fill_manual(values=c("green4","grey50")) +
+  scale_color_manual(values=c("green4","grey50")) + 
+  #scale_x_continuous(n.breaks=35) + 
+  labs(title="Finally, Green Buildings Have Lower Rents Over Half the Years It's Around", 
+       subtitle="a comparison of rent, adjusting for possible confounding information in the building age",
+       y='median rent value', 
+       x='building age') +
+  theme(legend.title = element_blank(),
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Change axis line
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold")) 
+```
+
+To summarize, at first glance the green building's rent looks higher and seems promising even adjusting for confounding variables in cluster information and stories. However, when we adjust for confounding variables such as size and age (not including renovated and net-contracted buildings), we see that green buildings do not have an advantage over non-green buildings. On those grounds, I disagree with the analysts conclusion.
+
+
+
+
+
+# Visual story telling part 2: 
+
+```{r, echo=FALSE, include=FALSE}
+rm(list=ls())
+```
+
+```{r, echo=FALSE, include=FALSE}
+abia_data <- read.csv('ABIA.csv')
+```
+
+```{r, echo=FALSE, include=FALSE}
+abia_df <- abia_data %>% 
+  mutate(part_of_week = ifelse(DayOfWeek == 6 | DayOfWeek == 7, 'weekend', 'week')) %>% 
+  mutate(real_delay = ArrDelay - DepDelay) %>% 
+  mutate(total_taxi_time = TaxiIn + TaxiOut) %>% 
+  mutate(arr_time_of_day = case_when(ArrTime >= 0 & ArrTime < 700 ~ 'early morning',
+                                     ArrTime >= 700 & ArrTime < 1200 ~ 'morning proper',
+                                     ArrTime >= 1200 & ArrTime < 1400 ~ 'early afternoon',
+                                     ArrTime >= 1400 & ArrTime < 1700 ~ 'late afternoon',
+                                     ArrTime >= 1700 & ArrTime < 2100 ~ 'evening',
+                                     ArrTime >= 2100 ~ 'night')) %>% 
+  mutate(dep_time_of_day = case_when(DepTime >= 0 & DepTime < 700 ~ 'early morning',
+                                     DepTime >= 700 & DepTime < 1200 ~ 'morning proper',
+                                     DepTime >= 1200 & DepTime < 1400 ~ 'early afternoon',
+                                     DepTime >= 1400 & DepTime < 1700 ~ 'late afternoon',
+                                     DepTime >= 1700 & DepTime < 2100 ~ 'evening',
+                                     DepTime >= 2100 ~ 'night')) %>% 
+  mutate(austin_dep_or_arr = ifelse(Origin == 'AUS', 'austin departure', 'austin arrival')) %>% 
+  mutate(perc_time_dep_delay = DepDelay / (DepDelay + ActualElapsedTime)) %>% 
+  mutate(perc_time_arr_delay = ArrDelay / (ArrDelay + ActualElapsedTime)) %>% 
+  mutate(flight_speed = Distance / AirTime) %>% 
+  mutate(distance_cat = ifelse(AirTime >= 180, 'long distance', 'short distance')) %>% 
+  mutate(busy_bin = ntile(total_taxi_time, 5)) %>% 
+  mutate(busy_level = case_when(busy_bin == 1 ~ 'hardly busy',
+                                busy_bin == 2 ~ 'somewhat busy',
+                                busy_bin == 3 ~ 'normal',
+                                busy_bin == 4 ~ 'moderately busy',
+                                busy_bin == 5 ~ 'very busy'))
+```
+
+```{r, echo=FALSE, include=FALSE}
+tail_count <- abia_df %>% 
+  group_by(TailNum) %>% 
+  summarise(tail_flight_count = n())
+```
+
+```{r, echo=FALSE, include=FALSE}
+tail_df <- abia_df %>% 
+  filter(austin_dep_or_arr == 'austin arrival') %>% 
+  #select(TailNum, part_of_week, total_taxi_time, real_delay) %>% 
+  group_by(TailNum, part_of_week) %>% 
+  summarise(total_taxi_time_med = median(total_taxi_time, na.rm=TRUE), 
+            real_delay_med = median(real_delay, na.rm=TRUE)) %>% 
+  filter(!is.na(total_taxi_time_med) & !is.na(real_delay_med))
+```
+
+```{r, echo=FALSE, include=FALSE}
+diverging_df <- abia_df %>%
+  filter(!is.na(real_delay)) %>% 
+  filter(austin_dep_or_arr == 'austin arrival') %>% 
+  group_by(busy_level) %>% 
+  summarize(median_real_delay = median(real_delay))
+diverging_df$busy_type <- ifelse(diverging_df$median_real_delay < 0, "below", "above")
+level_order <- c('hardly busy', 'somewhat busy', 'normal', 'moderately busy', 'very busy')
+```
+
+```{r, echo=FALSE}
+ggplot(diverging_df, aes(x=factor(busy_level, level=level_order), 
+                                  y=median_real_delay, label=median_real_delay)) + 
+  geom_point(stat='identity', aes(color=busy_type), size=6)  +
+  geom_segment(aes(y = 0, 
+                   x = busy_level, 
+                   yend = median_real_delay, 
+                   xend = busy_level,
+                   color=busy_type)) + 
+  scale_color_manual(name="Flight Time Difference", 
+                     labels = c("Flight Went Shorter", "Flight Went Longer"), 
+                     values = c("below"="#00ba38", "above"="#f8766d")) + 
+  geom_text(color="white", size=2) +
+  theme(legend.position = "none",
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        # Change axis line
+        #axis.title.y = element_blank(), 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold"))  +
+  #run longer annotation
+  annotate(
+    geom = "curve", x = 3.9, y = 5.8, xend = 4.9, yend = 5.3,
+    curvature = .3, color='#f8766d', arrow = arrow(length = unit(2, "mm"))) +
+  annotate(geom = "label", x = 3.5, y = 3.6, 
+           label = 'at very busy times, flights\ntend to run 5 minutes longer', hjust = "left",
+           color='#f8766d', size = 3, fontface=2)  + 
+  #run shorter annotation
+  #annotate(
+    #geom = "curve", x = 1.5, y = 2, xend = 1.9, yend = .3,
+    #curvature = .3, color='#00ba38', arrow = arrow(length = unit(2, "mm"))) +
+  #annotate(
+    #geom = "curve", x = 1.5, y = 2, xend = 1.1, yend = .3,
+    #curvature = -.3, color='#00ba38', arrow = arrow(length = unit(2, "mm"))) +
+  annotate(geom = "label", x = 1.5, y = -5.5, 
+           label = "when it's not busy, flights\ntend to run 6 minutes shorter", 
+           hjust = "left",
+           color='#00ba38', size = 3, fontface=2)  + 
+  ylim(-8, 8) +
+  coord_flip() + 
+  #geom_hline(yintercept = 0, color='grey') + 
+  theme_fivethirtyeight(base_size = 10) +
+  theme(
+    #legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    plot.caption = element_text(hjust = 0, face= "italic"), #Default is hjust=1
+    plot.title.position = "plot", #NEW parameter. Apply for subtitle too.
+    plot.caption.position =  "plot", 
+    #axis.title.x = element_text()
+    )+
+  labs(
+    title='Arriving In Austin At A Busy Time? Expect Your Flight to Run Long.',
+    subtitle = 'how busy the Austin airport is vs how long (in median minutes) flights that are arriving into Austin run long', 
+    y = 'median minutes flights run longer than expected',
+    x = '',
+    caption = "____\nNote: The airport levels of busy (y-axis), are proxy measured by the total taxi in and out time in minutes for a given flight. The idea being,\nthe longer it takes for a taxi to get in and out, usually the more cars and people are, i.e. the busier it is. The categorical levels represent\nfive bins of this data. How long a flight went over the expected length (x-axis) is the difference between the arrival delay and departure\ndelay to get a true sense of if the flight actually ran long or it was just delayed on arrival or departure."
+  ) 
+```
+
+
+
+
+
+# Portfolio modeling
+
+```{r, echo=FALSE, include=FALSE}
+rm(list=ls())
+```
+
+```{r, echo=FALSE, include=FALSE}
+#collect data
+mystocks <- c("SHV", "XMLV", "SPLV", "MRGR",
+              "QQQ", "VUG", "IWF", "XLY",
+              "USMV", "VGT", "COMT", "AOM")
+getSymbols(mystocks, from = "2016-08-08")
+```
+
+```{r, echo=FALSE, include=FALSE}
+#data prep:
+# adjust for splits and dividends
+# combine close-to-close changes in a single matrix
+
+#portofilo 1
+SHVa <- adjustOHLC(SHV)
+XMLVa <- adjustOHLC(XMLV)
+SPLVa <- adjustOHLC(SPLV)
+MRGRa <- adjustOHLC(MRGR)
+port_1_returns <- cbind(ClCl(SHVa), ClCl(XMLVa), ClCl(SPLVa), ClCl(MRGRa))
+port_1_returns <- as.matrix(na.omit(port_1_returns))
+
+#portfolio 2
+QQQa <- adjustOHLC(QQQ)
+VUGa <- adjustOHLC(VUG)
+IWFa <- adjustOHLC(IWF)
+XLYa <- adjustOHLC(XLY)
+port_2_returns <- cbind(ClCl(QQQa), ClCl(VUGa), ClCl(IWFa), ClCl(XLYa))
+port_2_returns <- as.matrix(na.omit(port_2_returns))
+
+#portfolio 3
+USMVa <- adjustOHLC(USMV)
+VGTa <- adjustOHLC(VGT)
+COMTa <- adjustOHLC(COMT)
+AOMa <-adjustOHLC(COMT)
+port_3_returns <- cbind(ClCl(USMVa), ClCl(VGTa), ClCl(COMTa), ClCl(AOMa))
+port_3_returns <- as.matrix(na.omit(port_3_returns))
+```
+
+```{r, echo=FALSE, include=FALSE}
+#portfolio 1 - safe
+#ETFs: SHV, XLV, SPLV
+
+# Update the value of your holdings
+# Assumes an equal allocation to each asset
+initial_wealth = 100000
+sim1 <- foreach(i=1:5000, .combine='rbind') %do% {
+	total_wealth = initial_wealth
+	weights = c(0.25, 0.25, 0.25, 0.25)
+	holdings = weights * total_wealth
+	n_days = 20 #4 weeks ~ 20 training day
+	wealthtracker = rep(0, n_days)
+	for(today in 1:n_days) {
+		return.today = resample(port_1_returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		total_wealth = sum(holdings)
+		wealthtracker[today] = total_wealth
+	}
+	wealthtracker
+}
+
+port_1_var <- quantile(sim1[,n_days]- initial_wealth, prob=0.05)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#portfolio 2 - aggressive
+#ETFs: QQQ, VUG, IWF, XLY
+
+# Update the value of your holdings
+# Assumes an equal allocation to each asset
+initial_wealth = 100000
+sim2 <- foreach(i=1:5000, .combine='rbind') %do% {
+	total_wealth = initial_wealth
+	weights = c(0.25, 0.25, 0.25, 0.25)
+	holdings = weights * total_wealth
+	n_days = 20 #4 weeks ~ 20 training day
+	wealthtracker = rep(0, n_days)
+	for(today in 1:n_days) {
+		return.today = resample(port_2_returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		total_wealth = sum(holdings)
+		wealthtracker[today] = total_wealth
+	}
+	wealthtracker
+}
+
+port_2_var <- quantile(sim2[,n_days]- initial_wealth, prob=0.05)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#portfolio 3 - diverse 
+#ETFs: USMV (low volatility), VGT (aggressive), COMT (moderate), AOM (moderate)
+
+# Update the value of your holdings
+# Assumes an equal allocation to each asset
+initial_wealth = 100000
+sim3 <- foreach(i=1:5000, .combine='rbind') %do% {
+	total_wealth = initial_wealth
+	weights = c(0.25, 0.25, 0.25, 0.25)
+	holdings = weights * total_wealth
+	n_days = 20 #4 weeks ~ 20 training day
+	wealthtracker = rep(0, n_days)
+	for(today in 1:n_days) {
+		return.today = resample(port_3_returns, 1, orig.ids=FALSE)
+		holdings = holdings + holdings*return.today
+		total_wealth = sum(holdings)
+		wealthtracker[today] = total_wealth
+	}
+	wealthtracker
+}
+
+port_3_var <- quantile(sim3[,n_days]- initial_wealth, prob=0.05)
+```
+
+**Analysis Background**
+
+
+
+For this task, I constructed three portfolios of $100,000 allocated across four ETFs within each portfolio and analyzed the short-term tail risk of the three portfolios. Each ETF across the portfolios has at least a five-year history, and I used bootstrap resampling on that five-year data (08/08/2016 – 08/08/2021) to calculate the Value at Risk (VaR) for each at the 5% level. The composition of each portfolio was based on the level of risk for the ETFs: safe, aggressive, and diversified. In this report below, you will find a summary of each portfolio and the VaR findings, followed by a concluding comparison across all three. 
+
+**Portfolio 1 – Safe**
+
+The first portfolio is made up of four safe ETFs: SHV (iShares Short Treasury Bond ETF), XMLV (Invesco S&P MidCap Low Volatility ETF), SPLV (Invesco S&P 500 Low Volatility ETF), and MRGR (ProShares Merger ETF). These were selected using the ETF Database groupings (e.g., low volatility). These ETFs have relatively stable share prices, so one would expect the VaR to be low. However, we also know that these ETFs lag in bull markets, so it is not always the case the VaR will be low. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this portfolio has a VaR of $4130.95, the lowest across all three portfolios. 
+
+**Portfolio 2 – Aggressive **
+
+The second portfolio is made up of four aggressive ETFs: QQQ (Invesco QQQ Trust), VUG (Vanguard Growth ETF), IWF (iShares Russell 1000 Growth ETF), and XLY (Consumer Discretionary Select Sector SPDR Fund). These were selected using the ETF Database groupings (e.g., aggressive). These types of ETFs are known to be high risk/high reward to provide growth. Given this, we might expect the VaR to be high for this portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), we see this expectation hold as the portfolio has a VaR of $7947.62, almost twice that of portfolio 1 (safe). 
+
+**Portfolio 3 – Diversified **
+
+The second portfolio is made up four ETFs of different risk levels. One is low volatility: USMV (iShares MSCI USA Min Vol Factor ETF); two are moderate: COMT (iShares GSCI Commodity Dynamic Roll Strategy ETF) and AOM (Shares Core Moderate Allocation ETF); and one is aggressive: VGT (Vanguard Information Technology ETF). These were selected using the ETF Database groupings (e.g., low volatility, moderate, and aggressive). The diversification of risk levels should, in theory, put the VaR somewhere between the safe portfolio and diversified portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this theory holds as this portfolio has a VaR of $6100.14, almost halfway between portfolio 1 (safe) and portfolio 2 (aggressive).
+
+**Conclusions**
+
+By conducting bootstrap sampling, we can better estimate the VaR for each of the portfolios (safe, aggressive, and diversified), thus better quantifying uncertainty around investment decisions. As discussed above, each portfolio returns a different VaR at the 5% level. Here, we see that the first portfolio, the safe portfolio, returns the lowest VaR, which might best appeal to investors who want to safeguard their investment. In contrast, the second portfolio returns the highest VaR, which might best appeal to investors who are looking for high risk/high reward investments. And for those investors with a risk aversion level in between, the third portfolio is the better option, returning a VaR between the first and third portfolio.
+
+
+# Market Segmentation
+
