@@ -16,6 +16,10 @@ library(tidyr)
 library(quantmod)
 library(mosaic)
 library(foreach)
+library(purrr)
+library(cluster)
+library(factoextra)
+library(dendextend)
 ```
 
 # Visual story telling part 1: green buildings 
@@ -436,7 +440,8 @@ sim1 <- foreach(i=1:5000, .combine='rbind') %do% {
 	wealthtracker
 }
 
-port_1_var <- quantile(sim1[,n_days]- initial_wealth, prob=0.05)
+port_1_var <- quantile(sim1[,20]- initial_wealth, prob=0.05)
+port_1_avg_pl <- mean(sim1[, 20] - initial_wealth)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
@@ -461,7 +466,8 @@ sim2 <- foreach(i=1:5000, .combine='rbind') %do% {
 	wealthtracker
 }
 
-port_2_var <- quantile(sim2[,n_days]- initial_wealth, prob=0.05)
+port_2_var <- quantile(sim2[,20]- initial_wealth, prob=0.05)
+port_2_avg_pl <- mean(sim2[, 20] - initial_wealth)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
@@ -486,31 +492,74 @@ sim3 <- foreach(i=1:5000, .combine='rbind') %do% {
 	wealthtracker
 }
 
-port_3_var <- quantile(sim3[,n_days]- initial_wealth, prob=0.05)
+port_3_var <- quantile(sim3[,20]- initial_wealth, prob=0.05)
+port_3_avg_pl <- mean(sim3[, 20] - initial_wealth)
 ```
+
+
 
 **Analysis Background**
 
-
-
-For this task, I constructed three portfolios of $100,000 allocated across four ETFs within each portfolio and analyzed the short-term tail risk of the three portfolios. Each ETF across the portfolios has at least a five-year history, and I used bootstrap resampling on that five-year data (08/08/2016 – 08/08/2021) to calculate the Value at Risk (VaR) for each at the 5% level. The composition of each portfolio was based on the level of risk for the ETFs: safe, aggressive, and diversified. In this report below, you will find a summary of each portfolio and the VaR findings, followed by a concluding comparison across all three. 
+For this task, three portfolios were constructed of $100,000 allocated across four ETFs within each portfolio and analyzed the short-term tail risk of the three portfolios. Each ETF across the portfolios has at least a five-year history, and bootstrap resampling (over five thousand iterations) was used on that five-year data (08/08/2016 – 08/08/2021) to calculate the Value at Risk (VaR) for each at the 5% level. The composition of each portfolio was based on the level of risk for the ETFs: safe, aggressive, and diversified. In this report below, you will find a summary of each portfolio and the VaR findings, followed by a concluding comparison across all three. 
 
 **Portfolio 1 – Safe**
 
-The first portfolio is made up of four safe ETFs: SHV (iShares Short Treasury Bond ETF), XMLV (Invesco S&P MidCap Low Volatility ETF), SPLV (Invesco S&P 500 Low Volatility ETF), and MRGR (ProShares Merger ETF). These were selected using the ETF Database groupings (e.g., low volatility). These ETFs have relatively stable share prices, so one would expect the VaR to be low. However, we also know that these ETFs lag in bull markets, so it is not always the case the VaR will be low. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this portfolio has a VaR of $4130.95, the lowest across all three portfolios. 
+The first portfolio is made up of four safe ETFs: SHV (iShares Short Treasury Bond ETF), XMLV (Invesco S&P MidCap Low Volatility ETF), SPLV (Invesco S&P 500 Low Volatility ETF), and MRGR (ProShares Merger ETF). These were selected using the ETF Database groupings (e.g., low volatility). These ETFs have relatively stable share prices, so one would expect the VaR to be low. However, we also know that these ETFs lag in bull markets, so it is not always the case the VaR will be low. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this portfolio has a VaR of \$4130.95 and an average profit of \$544.67, the lowest across all three portfolios. 
 
 **Portfolio 2 – Aggressive **
 
-The second portfolio is made up of four aggressive ETFs: QQQ (Invesco QQQ Trust), VUG (Vanguard Growth ETF), IWF (iShares Russell 1000 Growth ETF), and XLY (Consumer Discretionary Select Sector SPDR Fund). These were selected using the ETF Database groupings (e.g., aggressive). These types of ETFs are known to be high risk/high reward to provide growth. Given this, we might expect the VaR to be high for this portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), we see this expectation hold as the portfolio has a VaR of $7947.62, almost twice that of portfolio 1 (safe). 
+The second portfolio is made up of four aggressive ETFs: QQQ (Invesco QQQ Trust), VUG (Vanguard Growth ETF), IWF (iShares Russell 1000 Growth ETF), and XLY (Consumer Discretionary Select Sector SPDR Fund). These were selected using the ETF Database groupings (e.g., aggressive). These types of ETFs are known to be high risk/high reward to provide growth. Given this, we might expect the VaR to be high for this portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), we see this expectation hold as the portfolio has a VaR of \$7947.62, almost twice that of portfolio 1 (safe). The average profit of this portfolio is at \$1930.84, about 3.5 times that of profolio 1. This, whiwth the high VaR, indicates that this portfolio is indeed, high risk / high reward. 
 
 **Portfolio 3 – Diversified **
 
-The second portfolio is made up four ETFs of different risk levels. One is low volatility: USMV (iShares MSCI USA Min Vol Factor ETF); two are moderate: COMT (iShares GSCI Commodity Dynamic Roll Strategy ETF) and AOM (Shares Core Moderate Allocation ETF); and one is aggressive: VGT (Vanguard Information Technology ETF). These were selected using the ETF Database groupings (e.g., low volatility, moderate, and aggressive). The diversification of risk levels should, in theory, put the VaR somewhere between the safe portfolio and diversified portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this theory holds as this portfolio has a VaR of $6100.14, almost halfway between portfolio 1 (safe) and portfolio 2 (aggressive).
+The second portfolio is made up four ETFs of different risk levels. One is low volatility: USMV (iShares MSCI USA Min Vol Factor ETF); two are moderate: COMT (iShares GSCI Commodity Dynamic Roll Strategy ETF) and AOM (Shares Core Moderate Allocation ETF); and one is aggressive: VGT (Vanguard Information Technology ETF). These were selected using the ETF Database groupings (e.g., low volatility, moderate, and aggressive). The diversification of risk levels should, in theory, put the VaR somewhere between the safe portfolio and diversified portfolio. After performing bootstrap resampling for the 20-trading day result (over five thousand iterations), this theory holds as this portfolio has a VaR of \$6100.14 and an average profit of \$1219.93, almost halfway between portfolio 1 (safe) and portfolio 2 (aggressive).
 
 **Conclusions**
 
-By conducting bootstrap sampling, we can better estimate the VaR for each of the portfolios (safe, aggressive, and diversified), thus better quantifying uncertainty around investment decisions. As discussed above, each portfolio returns a different VaR at the 5% level. Here, we see that the first portfolio, the safe portfolio, returns the lowest VaR, which might best appeal to investors who want to safeguard their investment. In contrast, the second portfolio returns the highest VaR, which might best appeal to investors who are looking for high risk/high reward investments. And for those investors with a risk aversion level in between, the third portfolio is the better option, returning a VaR between the first and third portfolio.
+By conducting bootstrap sampling, we can better estimate the VaR for each of the portfolios (safe, aggressive, and diversified), thus better quantifying uncertainty around investment decisions. As discussed above, each portfolio returns a different VaR at the 5% level. Here, we see that the first portfolio, the safe portfolio, returns the lowest VaR and average profit, which might best appeal to investors who want to safeguard their investment. In contrast, the second portfolio returns the highest VaR, but also highest average profit, which might best appeal to investors who are looking for high risk/high reward investments. And for those investors with a risk aversion level in between, the third portfolio is the better option, returning a VaR and average profit between the first and third portfolio.
 
 
 # Market Segmentation
+
+```{r, echo=FALSE, include=FALSE}
+sm_data <- read.csv('social_marketing.csv')
+```
+
+```{r, echo=FALSE}
+head(sm_data)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#variable selection
+sm_data %>%
+  keep(is.integer) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    geom_histogram()
+```
+
+```{r, echo=FALSE, include=FALSE}
+#drop ID
+sm_df <- sm_data[, -c(1,36,37)]
+```
+
+```{r, echo=FALSE, include=FALSE}
+#data pre-processing
+X <- sm_df
+X <- scale(X, center=TRUE, scale=TRUE)
+mu <- attr(X,"scaled:center")
+sigma <- attr(X,"scaled:scale")
+distance_between_customers <- dist(X)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#hierarchical clustering
+h1 <- hclust(distance_between_customers, method='complete')
+gap_stat <- clusGap(X, FUNcluster = factoextra::hcut, nstart = 50, K.max = 10, B = 50)
+fviz_gap_stat(gap_stat)
+```
+
+
+
 
