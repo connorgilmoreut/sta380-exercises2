@@ -525,41 +525,141 @@ By conducting bootstrap sampling, we can better estimate the VaR for each of the
 sm_data <- read.csv('social_marketing.csv')
 ```
 
-```{r, echo=FALSE}
-head(sm_data)
+```{r, echo=FALSE, include=FALSE}
+#variable selection 
+#find percentage of zeros in a given interest
+sum(sm_data$small_business == 0 ) / length(sm_data$small_business)
+
+#drop regardless of other pre-processing steps
+always_drops <- c('X', 'adult', 'spam', 'uncategorized')
 ```
 
 ```{r, echo=FALSE, include=FALSE}
-#variable selection
-sm_data %>%
-  keep(is.integer) %>% 
-  gather() %>% 
-  ggplot(aes(value)) +
-    facet_wrap(~ key, scales = "free") +
-    geom_histogram()
-```
-
-```{r, echo=FALSE, include=FALSE}
-#drop ID
-sm_df <- sm_data[, -c(1,36,37)]
+#drop varaibles above
+sm_df <- sm_data[, -which(names(sm_data) %in% always_drops)]
 ```
 
 ```{r, echo=FALSE, include=FALSE}
 #data pre-processing
-X <- sm_df
+
+#first normalize phrase counts to phrase frequencies.
+X <- sm_df/rowSums(sm_df)
 X <- scale(X, center=TRUE, scale=TRUE)
-mu <- attr(X,"scaled:center")
-sigma <- attr(X,"scaled:scale")
 distance_between_customers <- dist(X)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
 #hierarchical clustering
+#build hierarchical cluster model 
 h1 <- hclust(distance_between_customers, method='complete')
-gap_stat <- clusGap(X, FUNcluster = factoextra::hcut, nstart = 50, K.max = 10, B = 50)
-fviz_gap_stat(gap_stat)
 ```
 
+```{r, echo=FALSE, include=FALSE}
+#run to get wss statistic
+p1 <- factoextra::fviz_nbclust(X, FUN = hcut, method = "wss")
+```
+
+```{r, echo=FALSE, include=FALSE}
+#run to get gap statistic
+# about 2 hour run time
+#p2 <- factoextra::fviz_nbclust(X, FUN = hcut, method = "gap_stat", nboot=50)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#pick four clusters as that is more of a relevant number for marketing needs, than the 10 indicated by the wss and gap statistics 
+four_clusters <- cutree(h1, k=4)
+```
+
+```{r,echo=FALSE, include=FALSE}
+# get counts and proportions of clusters
+summary(factor(four_clusters))
+(summary(factor(four_clusters)) / nrow(sm_df)) * 100
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get props instead of counts
+prop_df <- sm_df/rowSums(sm_df)
+#separate the clusters into separate dataframes to get summary statistics
+cluster1_df <- prop_df[which(four_clusters == 1), ]
+cluster2_df <- prop_df[which(four_clusters == 2), ]
+cluster3_df <- prop_df[which(four_clusters == 3), ]
+cluster4_df <- prop_df[which(four_clusters == 4), ]
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get medians for interpretation
+clust_1_vals <- data.frame(apply(cluster1_df, 2, median))
+colnames(clust_1_vals) <- ('median_vals')
+clust_2_vals <- data.frame(apply(cluster2_df, 2, median))
+colnames(clust_2_vals) <- ('median_vals')
+clust_3_vals <- data.frame(apply(cluster3_df, 2, median))
+colnames(clust_3_vals) <- ('median_vals')
+clust_4_vals <- data.frame(apply(cluster4_df, 2, median))
+colnames(clust_4_vals) <- ('median_vals')
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get medians for interpretation
+
+#cluster 1
+clust_1_vals %>% 
+  filter(median_vals > 0) %>% 
+  mutate(full_perc = median_vals*100) %>%
+  arrange(desc(median_vals))
+
+#cluster 2
+clust_2_vals %>% 
+  filter(median_vals > 0) %>% 
+  mutate(full_perc = median_vals*100) %>%
+  arrange(desc(median_vals))
+
+#cluster 3
+clust_3_vals %>% 
+  filter(median_vals > 0) %>% 
+  mutate(full_perc = median_vals*100) %>%
+  arrange(desc(median_vals))
+
+#cluster 4
+clust_4_vals %>% 
+  filter(median_vals > 0) %>% 
+  mutate(full_perc = median_vals*100) %>%
+  arrange(desc(median_vals))
+```
+
+
+**Market Segmentation Overview**
+
+For this analysis, the tweets of NutrientH20’s Twitter followers were mined to understand NutrientH20’s market segments and what they talk about on Twitter. There are four market segments derived from the analysis named: Everyday Life Tweeters, Small Business Group, Active Naturalists, and Tech Savvy Politicos. This analysis will help guide NutrientH20 to craft more effective social media messaging for improved engagement across these four segments. 
+
+**Analysis Background**
+
+*Pre-Processing and Model Building* 
+
+For this analysis, a market segment is defined as a cluster. An agglomerative hierarchical clustering method was applied to the tweet data (where the data represents a count of different interests a given user discusses, as annotated by human reviewers). First, there are three interests left out: uncategorized, spam, and adult. This is because they do not offer much for social media managers to craft better messages and because of the rarities of occurrences and known inaccuracies in human annotation. Then, the count data of all the other interests was normalized to interest frequencies (i.e. proportions) instead of pure interest count and then scaled and centered. In the hierarchical clustering algorithm, the complete linkage method was used because it is more robust to outliers. This is important because there are many inaccuracies with the human reviewers who annotated the tweets, so the complete linkage function can help to keep the outliers’ adverse influence at bay. 
+
+*Cluster Selection*
+
+An elbow plot was generated for the WSS and Gap Statistic for this clustering method over a range of 10 cluster (k) counts to help select the number of clusters. These both generated an optimal cluster count of 10, however this does not make sense in the context of marketing and market segmentation – 10 is too many to become familiar with and use. So, a cluster count of four was chosen, meaning there are four market segments. This is much more feasible for social media managers at NutrientH20 to learn, use, and keep track of. The median values of frequencies of interests for each cluster were generated and synthesized in the interpretations in the sections describing the market segments below. 
+
+**Segment 1 – Everyday Life Tweeters (95.2%)**
+
+This segment is by far the largest of NutrientH20’s market segments in Twitter at 95.2%. The brand followers here tweet about everyday life interests from general chatter to photo sharing to sports and more. In fact, on median, these followers mostly discuss general chatter at 10% followed by photo sharing at 5.6% and current events at 3.6%. These followers, though, have a long tail of interest discussion at very similar frequencies. This includes travel, sports, food, cooking, shopping, and more. From this we infer that these brand followers are interested in tweeting about broad interests that come up in the course of everyday life. For NutrientH20’s social media managers, tweets that resonate with everyday life interests, will resonate with this segment. This segment does not have a very specific, defined set of interests, so it is important for NutrientH20’s social media managers to not craft too interest-specific tweets to try to reach and engage these followers.
+
+**Segment 2 – Small Business Group (2.8%)**
+
+This segment, although small, is a much more interest-focused market segment than the first segment, Everyday Life Tweeters. This segment talks a lot about small business, on median at 6.7% and current events at 6.25%, indicating these tweeters are focused on small businesses and the world and markets they operate in. They are also sharing photos along the way, possibly about their small business or events affecting them, on median at 7.4%. What is interesting about this group is that they mainly are just discussing general chatter at a median 16.7%. What this might tell us is that while these followers may post musings or random thoughts a lot, when they do discuss interests, they are tweeting, with images, about small businesses and current events. For social media managers at NutrientH20, this means these followers may not be hyper-focused all the time on more niche-interests, but when they do, it’s on small businesses and current events. So, they will relate more and engage more with those tweets. Maybe if NutrientH20 tweets about their small businesses, or discusses potential small business partnership, they can improve engagement and following among this group. 
+
+**Segment 3 – Active Naturalists (1.69%)**
+
+This segment accounts for a small portion of NutrientH20’s brand followers, however it is a much more interest-focused than the first, more broad segment: Everyday Life Tweeters. This group, on median spends 7.7% of their time on eco interests, 4% on travel, and 6.8% on sharing photos, presumably related to those two interests. While they spend most of their tweets on chatter, on median 19% of the time, this does not mean they are not interested in active naturalist-related interests. What it means is that most of their tweets may just be random musings, but when they do talk about specific interests, they talk about eco, travel, and photos thereof. This is very helpful for NutrientH20’s social media managers. They can use this to make nature /eco-related tweets (not all of the time though), so these followers will engage.
+
+**Segment 4 – Tech Savvy Politicos (0.33%)**
+
+The smallest and one of the most interest-focused market segments. This market segment spends on median, 15.2% of their tweets on computers and 10.6% on politics. How can these two interests be related? With the rise of Big Tech, increasing regulations, and the relationship between social media platforms and election campaigning, tech and politics are increasingly intertwined. What does this mean for NutrientH20’s social media managers? It is important to not craft tweets that may create controversies on these issues, but a safer way to engage may be to stay away from politics, but every so often highlight the company’s use of technology.
+
+**Conclusions**
+
+These four market segments, varied in size, represent the market segments that NutrientH20’s social media managers and marketing professionals need to learn, use, and understand to craft more effective social media messaging. For most of their users (95.2%), tweets that resonate with everyday life are going to resonate the most, but for the other market segments, it is important to craft messaging that resonates to the specific interests they have: small businesses and related events, being active and in nature, and tech-related political topics. These market segments were discovered via an agglomerative hierarchical clustering, using the complete linkage function on normalized and scaled distance data. The number of segments (i.e. clusters) were chosen based on domain relevance, as the WSS and Gap statistics determined a high number of clusters, which would be unhelpful for NutrientH20’s social media managers. Over time, the data can be updated with new followers and the clustering re-ran to discover what new (or maybe un-changed) clusters appear. 
 
 
 
