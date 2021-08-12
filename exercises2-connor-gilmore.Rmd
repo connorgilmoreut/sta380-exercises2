@@ -690,6 +690,7 @@ rm(list=ls())
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#funtion to read files
 readerPlain = function(fname){
 				tm::readPlain(elem=list(content=readLines(fname)), 
 							id=fname, language='en') }
@@ -730,6 +731,7 @@ for(filename in test_files) {
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#clean file names for for training files
 all_train <- lapply(train_files, readerPlain) 
 
 mynames_train <- train_files %>%
@@ -742,6 +744,7 @@ names(all_train) <- mynames_train
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#clean file names for testing files
 all_test <- lapply(test_files, readerPlain) 
 
 mynames_test <- test_files %>%
@@ -754,22 +757,26 @@ names(all_test) <- mynames_test
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#create a dataframe that corresponds to the train dataset with the response variable, author name, the PK, file name (id), and that each row is a training document
 train_df <- do.call(rbind, Map(data.frame, author_name=train_author_names, file_id=mynames_train))
 colnames(train_df) <- c('author_name', 'file_id')
 train_df$type <- 'train'
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#create a dataframe that corresponds to the test dataset with the response variable, author name, the PK, file name (id), and that each row is a testing document
 test_df <- do.call(rbind, Map(data.frame, author_name=test_author_names, file_id=mynames_test))
 colnames(test_df) <- c('author_name', 'file_id')
 test_df$type <- 'test'
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#combine train and test to compute tf-idf together
 all_documents <- rbind(all_train, all_test)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#clean train and test to compute tf-idf together
 documents_raw <- Corpus(VectorSource(all_documents))
 my_documents<- documents_raw %>%
   tm_map(content_transformer(tolower))  %>%             # make everything lowercase
@@ -779,6 +786,7 @@ my_documents<- documents_raw %>%
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#clean train documents
 train_documents_raw <- Corpus(VectorSource(all_train))
 train_my_documents <- train_documents_raw %>%
   tm_map(content_transformer(tolower))  %>%             # make everything lowercase
@@ -786,6 +794,7 @@ train_my_documents <- train_documents_raw %>%
   tm_map(content_transformer(removePunctuation)) %>%    # remove punctuation
   tm_map(content_transformer(stripWhitespace))         
 
+#clean test documents
 test_documents_raw <- Corpus(VectorSource(all_test))
 test_my_documents <- test_documents_raw %>%
   tm_map(content_transformer(tolower))  %>%             # make everything lowercase
@@ -797,6 +806,7 @@ test_my_documents <- test_documents_raw %>%
 ```{r, echo=FALSE, include=FALSE}
 #stopwords("en")
 #stopwords("SMART")
+#remove stopwords
 my_documents <- tm_map(my_documents, content_transformer(removeWords),
                        stopwords("en"))
 train_my_documents <- tm_map(train_my_documents, content_transformer(removeWords),
@@ -810,7 +820,7 @@ test_my_documents <- tm_map(test_my_documents, content_transformer(stemDocument)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
-#all combined 
+#create tf-idf matrix (dataframe) for all combined, and then split
 DTM <- DocumentTermMatrix(my_documents)
 DTM <- removeSparseTerms(DTM, 0.95)
 tfidf <- weightTfIdf(DTM)
@@ -819,12 +829,13 @@ scrub_cols <- which(colSums(X) == 0)
 X <- X[,-scrub_cols]
 X_df <- data.frame(X)
 
+#split out
 X_train_all <- X_df[1:2500, ]
 X_test_all <- X_df[2501:5000, ]
 ```
 
 ```{r, echo=FALSE, include=FALSE}
-#train
+#create tf-idf matrix (dataframe) for training douments
 DTM_train <- DocumentTermMatrix(train_my_documents)
 DTM_train <- removeSparseTerms(DTM_train, 0.95)
 tfidf_train <- weightTfIdf(DTM_train)
@@ -833,7 +844,7 @@ X_train <- as.matrix(tfidf_train)
 #X_train <- X_train[,-scrub_cols_train]
 X_train_df <- data.frame(X_train)
 
-#test
+#create tf-idf matrix (dataframe) for testing douments
 DTM_test <- DocumentTermMatrix(test_my_documents)
 DTM_test <- removeSparseTerms(DTM_test, 0.95)
 tfidf_test <- weightTfIdf(DTM_test)
@@ -842,25 +853,22 @@ X_test <- as.matrix(tfidf_test)
 #X_test <- X_test[,-scrub_cols_test]
 X_test_df <- data.frame(X_test)
 
-#filter test
-test_sub1 <- data.frame(X_test_df[,intersect(colnames(X_test_df),
-                                           colnames(X_train_df))])
+#filter test so that terms only match training terms
+filtered_test <- X_test_df[ , which(names(X_test_df) %in% colnames(X_train_df))]
 test_sub2 <- read.table(textConnection(""), col.names = colnames(X_train_df),
                  colClasses = "integer")
-X_test_df2 <- rbind.fill(test_sub1, test_sub2)
-X_test_df2[is.na(X_test_df2)] <- 0
-
-filtered_test <- X_test_df[ , which(names(X_test_df) %in% colnames(X_train_df))]
 filtered_test2 <- rbind.fill(filtered_test, test_sub2)
 filtered_test2[is.na(filtered_test2)] <- 0
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#get response variables for train and test sets
 y_train_data <- as.factor(train_df$author_name)
 y_test_data <- as.factor(test_df$author_name)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
+#calculate cosine distance matrices for train and test sets for KNN model
 X_train_cosine <- as.matrix(X_train_df)
 sim <- X_train_cosine / sqrt(rowSums(X_train_cosine * X_train_cosine))
 sim <- sim %*% t(sim)
