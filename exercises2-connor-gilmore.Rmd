@@ -20,6 +20,22 @@ library(purrr)
 library(cluster)
 library(factoextra)
 library(dendextend)
+library(tm) 
+library(tidyverse)
+library(slam)
+library(proxy)
+library(class)
+#library(Rcpp)
+library(text2vec)
+#library(data.table)
+#library(magrittr)
+library(superml)
+#library(caret)
+library(plyr)
+library(SnowballC)
+library(glmnet)
+library(rpart)
+library(naivebayes)
 ```
 
 # Visual story telling part 1: green buildings 
@@ -522,6 +538,10 @@ By conducting bootstrap sampling, we can better estimate the VaR for each of the
 # Market Segmentation
 
 ```{r, echo=FALSE, include=FALSE}
+rm(list=ls())
+```
+
+```{r, echo=FALSE, include=FALSE}
 sm_data <- read.csv('social_marketing.csv')
 ```
 
@@ -660,6 +680,235 @@ The smallest and one of the most interest-focused market segments. This market s
 **Conclusions**
 
 These four market segments, varied in size, represent the market segments that NutrientH20’s social media managers and marketing professionals need to learn, use, and understand to craft more effective social media messaging. For most of their users (95.2%), tweets that resonate with everyday life are going to resonate the most, but for the other market segments, it is important to craft messaging that resonates to the specific interests they have: small businesses and related events, being active and in nature, and tech-related political topics. These market segments were discovered via an agglomerative hierarchical clustering, using the complete linkage function on normalized and scaled distance data. The number of segments (i.e. clusters) were chosen based on domain relevance, as the WSS and Gap statistics determined a high number of clusters, which would be unhelpful for NutrientH20’s social media managers. Over time, the data can be updated with new followers and the clustering re-ran to discover what new (or maybe un-changed) clusters appear. 
+
+
+
+# Author attribution 
+
+```{r, echo=FALSE, include=FALSE}
+rm(list=ls())
+```
+
+```{r, echo=FALSE, include=FALSE}
+readerPlain = function(fname){
+				tm::readPlain(elem=list(content=readLines(fname)), 
+							id=fname, language='en') }
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get list of directories and 
+train_path <- '/Users/connorgilmore/dev/sta-380/STA380/data/ReutersC50/C50train'
+train_dirs <- list.dirs(train_path, recursive = TRUE)
+train_files <- list.files(train_path, recursive=TRUE, full.names=TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get list of directories and 
+test_path <- '/Users/connorgilmore/dev/sta-380/STA380/data/ReutersC50/C50test'
+test_dirs <- list.dirs(test_path, recursive = TRUE)
+test_files <- list.files(test_path, recursive=TRUE, full.names=TRUE)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get author names - the response variable
+train_author_names <- list()
+for(filename in train_files) {
+  author_l <- strsplit(filename, "/")
+  author <- tail(author_l[[1]], 2)[1]
+  train_author_names <- append(train_author_names, author)
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+#get author names - the response variable
+test_author_names <- list()
+for(filename in test_files) {
+  author_l <- strsplit(filename, "/")
+  author <- tail(author_l[[1]], 2)[1]
+  test_author_names <- append(test_author_names, author)
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+all_train <- lapply(train_files, readerPlain) 
+
+mynames_train <- train_files %>%
+  { strsplit(., '/', fixed=TRUE) } %>%
+  { lapply(., tail, n=2) } %>%
+  { lapply(., paste0, collapse = '') } %>%
+  unlist
+
+names(all_train) <- mynames_train
+```
+
+```{r, echo=FALSE, include=FALSE}
+all_test <- lapply(test_files, readerPlain) 
+
+mynames_test <- test_files %>%
+  { strsplit(., '/', fixed=TRUE) } %>%
+  { lapply(., tail, n=2) } %>%
+  { lapply(., paste0, collapse = '') } %>%
+  unlist
+
+names(all_test) <- mynames_test
+```
+
+```{r, echo=FALSE, include=FALSE}
+train_df <- do.call(rbind, Map(data.frame, author_name=train_author_names, file_id=mynames_train))
+colnames(train_df) <- c('author_name', 'file_id')
+train_df$type <- 'train'
+```
+
+```{r, echo=FALSE, include=FALSE}
+test_df <- do.call(rbind, Map(data.frame, author_name=test_author_names, file_id=mynames_test))
+colnames(test_df) <- c('author_name', 'file_id')
+test_df$type <- 'test'
+```
+
+```{r, echo=FALSE, include=FALSE}
+all_documents <- rbind(all_train, all_test)
+```
+
+```{r, echo=FALSE, include=FALSE}
+documents_raw <- Corpus(VectorSource(all_documents))
+my_documents<- documents_raw %>%
+  tm_map(content_transformer(tolower))  %>%             # make everything lowercase
+  tm_map(content_transformer(removeNumbers)) %>%        # remove numbers
+  tm_map(content_transformer(removePunctuation)) %>%    # remove punctuation
+  tm_map(content_transformer(stripWhitespace))
+```
+
+```{r, echo=FALSE, include=FALSE}
+train_documents_raw <- Corpus(VectorSource(all_train))
+train_my_documents <- train_documents_raw %>%
+  tm_map(content_transformer(tolower))  %>%             # make everything lowercase
+  tm_map(content_transformer(removeNumbers)) %>%        # remove numbers
+  tm_map(content_transformer(removePunctuation)) %>%    # remove punctuation
+  tm_map(content_transformer(stripWhitespace))         
+
+test_documents_raw <- Corpus(VectorSource(all_test))
+test_my_documents <- test_documents_raw %>%
+  tm_map(content_transformer(tolower))  %>%             # make everything lowercase
+  tm_map(content_transformer(removeNumbers)) %>%        # remove numbers
+  tm_map(content_transformer(removePunctuation)) %>%    # remove punctuation
+  tm_map(content_transformer(stripWhitespace))         
+```
+
+```{r, echo=FALSE, include=FALSE}
+#stopwords("en")
+#stopwords("SMART")
+my_documents <- tm_map(my_documents, content_transformer(removeWords),
+                       stopwords("en"))
+train_my_documents <- tm_map(train_my_documents, content_transformer(removeWords),
+                       stopwords("en"))
+test_my_documents <- tm_map(test_my_documents, content_transformer(removeWords),
+                       stopwords("en"))
+#stem
+my_documents <- tm_map(my_documents, content_transformer(stemDocument))
+train_my_documents <- tm_map(train_my_documents, content_transformer(stemDocument))
+test_my_documents <- tm_map(test_my_documents, content_transformer(stemDocument))
+```
+
+```{r, echo=FALSE, include=FALSE}
+#all combined 
+DTM <- DocumentTermMatrix(my_documents)
+DTM <- removeSparseTerms(DTM, 0.95)
+tfidf <- weightTfIdf(DTM)
+X <- as.matrix(tfidf)
+scrub_cols <- which(colSums(X) == 0)
+X <- X[,-scrub_cols]
+X_df <- data.frame(X)
+
+X_train_all <- X_df[1:2500, ]
+X_test_all <- X_df[2501:5000, ]
+```
+
+```{r, echo=FALSE, include=FALSE}
+#train
+DTM_train <- DocumentTermMatrix(train_my_documents)
+DTM_train <- removeSparseTerms(DTM_train, 0.95)
+tfidf_train <- weightTfIdf(DTM_train)
+X_train <- as.matrix(tfidf_train)
+#scrub_cols_train <- which(colSums(X_train) == 0)
+#X_train <- X_train[,-scrub_cols_train]
+X_train_df <- data.frame(X_train)
+
+#test
+DTM_test <- DocumentTermMatrix(test_my_documents)
+DTM_test <- removeSparseTerms(DTM_test, 0.95)
+tfidf_test <- weightTfIdf(DTM_test)
+X_test <- as.matrix(tfidf_test)
+#scrub_cols_test<- which(colSums(X_test) == 0)
+#X_test <- X_test[,-scrub_cols_test]
+X_test_df <- data.frame(X_test)
+
+#filter test
+test_sub1 <- data.frame(X_test_df[,intersect(colnames(X_test_df),
+                                           colnames(X_train_df))])
+test_sub2 <- read.table(textConnection(""), col.names = colnames(X_train_df),
+                 colClasses = "integer")
+X_test_df2 <- rbind.fill(test_sub1, test_sub2)
+X_test_df2[is.na(X_test_df2)] <- 0
+
+filtered_test <- X_test_df[ , which(names(X_test_df) %in% colnames(X_train_df))]
+filtered_test2 <- rbind.fill(filtered_test, test_sub2)
+filtered_test2[is.na(filtered_test2)] <- 0
+```
+
+```{r, echo=FALSE, include=FALSE}
+y_train_data <- as.factor(train_df$author_name)
+y_test_data <- as.factor(test_df$author_name)
+```
+
+```{r, echo=FALSE, include=FALSE}
+X_train_cosine <- as.matrix(X_train_df)
+sim <- X_train_cosine / sqrt(rowSums(X_train_cosine * X_train_cosine))
+sim <- sim %*% t(sim)
+D_sim_train <- as.dist(1 - sim)
+
+X_test_cosine <- as.matrix(filtered_test2)
+sim <- X_test_cosine / sqrt(rowSums(X_test_cosine * X_test_cosine))
+sim <- sim %*% t(sim)
+D_sim_test <- as.dist(1 - sim)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#knn model 
+pr <- knn(D_sim_train, D_sim_test, cl=y_train_data, k=5)
+tab <- table(pr,y_test_data)
+knn_acc <- mean(pr == y_test_data)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#decision tree
+X_train_full_df <- cbind(X_train_df, author_name = train_df$author_name)
+fit <- rpart(author_name~., data = X_train_full_df, method = 'class')
+predict_unseen <- predict(fit, filtered_test2, type = 'class')
+dt_acc <- mean(predict_unseen == y_test_data)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#multinomial naive bayes
+mnb <- multinomial_naive_bayes(x = X_train_df, y = y_train_data, laplace = 1/ncol(X_train_df))
+nb_pr <- predict(mnb, as.matrix(filtered_test2), type = "class")
+nb_acc <- mean(nb_pr == y_test_data)
+```
+
+### Data Pre-Processing Explanation
+
+For this task, I first collected the data and did basic prep work by reading in all of the files (train and test), extracting the author names for classification, and cleaning the file names. I first decided to create a tf-idf matrix for the train and test files separately. Before doing that, I first turned the train and test documents (separately) into corpora. For each corpus, I made everything lowercase, removed numbers and punctuation and stripped whitespace. I then removed stop words as these words do not carry semantic meaning or really any helpful information. stop words are needed for grammatical construction, but on their own, they are not helpful. Then, I stemmed the document so that words such as 'running' and 'run' can be treated as the same word. This also helps to reduce the number of features (i.e., words) in our model later on. From there, for each the train and test sets, I created a document term matrix and removed any sparse terms that have a count of zero in 95% of documents. Most likely those do not provide helpful information and only add to the complexity of the model (via the number of features). I then got the weighted tf-idf matrix based on these document term matrices for each the train and test set. 
+
+### Analysis Explanation
+
+For the models, I considered the tf-idf matrix as the dataset (features) for the classification models to predict the author who wrote a given article. Each predictor is a term, and each value, is the tf-idf score of that term in any given document (i.e., the row).
+
+First, I used a KNN classifier to do this. I then created a cosine distance matrix for the tf-idf weights and fit a KNN to training data (cosine distance matrix of the training data tf-idf weights). When applied to the test data (also converted to a cosine distance matrix of the test data), the model achieved an accuracy of 47% with the value of k, nearest neighbors, at 5. If one figures that a human has a 1/50 (or 2%) chance at correctly guessing the author, then this accuracy is much higher than the threshold and outperforms a random human guess. 
+
+The next model I considered was a multinomial naive bayes model. I built the model using the tf-idf weights of the training data and a Laplace  smoothing factor of 1/number of terms. This model outperformed the KNN model at 59%. The Laplace  factor here accounts for a pseudo count of words that we did not seen in the training data, but we did see in the test data documents. In comparison to the KNN model, which did not add a pseudo count , this model outperforms, possibly explained by the inclusion of a pseudo count.
+
+Predicting the author of an article is a difficult classification task. As explained above, when a tf-idf matrix is used in the model, where each feature is a term and each value is a tf-idf score of that term in the document, much better job at naming the author of an article over a random human guess is achieved Extensive data pre-processing techniques including cleaning non-word characters, removing stop words, and stemming words, refine the documents so that a more meaningful and helpful tf-idf matrix is constructed. 
+
+
 
 
 
