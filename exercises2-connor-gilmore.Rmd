@@ -28,7 +28,7 @@ library(class)
 #library(Rcpp)
 library(text2vec)
 #library(data.table)
-#library(magrittr)
+library(magrittr)
 library(superml)
 #library(caret)
 library(plyr)
@@ -36,6 +36,9 @@ library(SnowballC)
 library(glmnet)
 library(rpart)
 library(naivebayes)
+library(proxy)
+library(arules)
+library(arulesViz)
 ```
 
 # Visual story telling part 1: green buildings 
@@ -685,6 +688,7 @@ These four market segments, varied in size, represent the market segments that N
 
 # Author attribution 
 
+
 ```{r, echo=FALSE, include=FALSE}
 rm(list=ls())
 ```
@@ -840,9 +844,10 @@ DTM_train <- DocumentTermMatrix(train_my_documents)
 DTM_train <- removeSparseTerms(DTM_train, 0.95)
 tfidf_train <- weightTfIdf(DTM_train)
 X_train <- as.matrix(tfidf_train)
-#scrub_cols_train <- which(colSums(X_train) == 0)
-#X_train <- X_train[,-scrub_cols_train]
 X_train_df <- data.frame(X_train)
+DTM_train_df <- data.frame(as.matrix(DTM_train))
+#scrub_cols_train <- which(colSums(DTM_train_df) == 0)
+#DTM_train_df <- DTM_train_df[,-scrub_cols_train]
 
 #create tf-idf matrix (dataframe) for testing douments
 DTM_test <- DocumentTermMatrix(test_my_documents)
@@ -852,13 +857,21 @@ X_test <- as.matrix(tfidf_test)
 #scrub_cols_test<- which(colSums(X_test) == 0)
 #X_test <- X_test[,-scrub_cols_test]
 X_test_df <- data.frame(X_test)
+DTM_test_df <- data.frame(as.matrix(DTM_test))
 
-#filter test so that terms only match training terms
+#filter test so that terms only match training terms - tf idf
 filtered_test <- X_test_df[ , which(names(X_test_df) %in% colnames(X_train_df))]
 test_sub2 <- read.table(textConnection(""), col.names = colnames(X_train_df),
                  colClasses = "integer")
 filtered_test2 <- rbind.fill(filtered_test, test_sub2)
 filtered_test2[is.na(filtered_test2)] <- 0
+
+#filter test so that terms only match training terms - counts
+DTM_filtered_test <- DTM_test_df[ , which(names(DTM_test_df) %in% colnames(DTM_train_df))]
+DTM_test_sub2 <- read.table(textConnection(""), col.names = colnames(DTM_train_df),
+                 colClasses = "integer")
+DTM_filtered_test2 <- rbind.fill(DTM_filtered_test, DTM_test_sub2)
+DTM_filtered_test2[is.na(DTM_filtered_test2)] <- 0
 ```
 
 ```{r, echo=FALSE, include=FALSE}
@@ -869,20 +882,13 @@ y_test_data <- as.factor(test_df$author_name)
 
 ```{r, echo=FALSE, include=FALSE}
 #calculate cosine distance matrices for train and test sets for KNN model
-X_train_cosine <- as.matrix(X_train_df)
-sim <- X_train_cosine / sqrt(rowSums(X_train_cosine * X_train_cosine))
-sim <- sim %*% t(sim)
-D_sim_train <- as.dist(1 - sim)
-
-X_test_cosine <- as.matrix(filtered_test2)
-sim <- X_test_cosine / sqrt(rowSums(X_test_cosine * X_test_cosine))
-sim <- sim %*% t(sim)
-D_sim_test <- as.dist(1 - sim)
+cosine_dist_mat_train <- proxy::dist(as.matrix(X_train_df), method='cosine')
+cosine_dist_mat_test <- proxy::dist(as.matrix(X_test_df), method='cosine')
 ```
 
 ```{r, echo=FALSE, include=FALSE}
 #knn model 
-pr <- knn(D_sim_train, D_sim_test, cl=y_train_data, k=5)
+pr <- knn(cosine_dist_mat_train, cosine_dist_mat_test, cl=y_train_data, k=5)
 tab <- table(pr,y_test_data)
 knn_acc <- mean(pr == y_test_data)
 ```
@@ -896,27 +902,142 @@ dt_acc <- mean(predict_unseen == y_test_data)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
-#multinomial naive bayes
+#multinomial naive bayes - counts
+mnb_counts <- multinomial_naive_bayes(x = DTM_train_df, y = y_train_data, 
+                                      laplace = 1/ncol(DTM_train_df))
+nb_pr_counts <- predict(mnb_counts, as.matrix(DTM_filtered_test2), type = "class")
+nb_acc_counts <- mean(nb_pr_counts == y_test_data)
+```
+
+```{r, echo=FALSE, include=FALSE}
+#multinomial naive bayes - tfidf
 mnb <- multinomial_naive_bayes(x = X_train_df, y = y_train_data, laplace = 1/ncol(X_train_df))
 nb_pr <- predict(mnb, as.matrix(filtered_test2), type = "class")
 nb_acc <- mean(nb_pr == y_test_data)
 ```
 
+
 ### Data Pre-Processing Explanation
 
-For this task, I first collected the data and did basic prep work by reading in all of the files (train and test), extracting the author names for classification, and cleaning the file names. I first decided to create a tf-idf matrix for the train and test files separately. Before doing that, I first turned the train and test documents (separately) into corpora. For each corpus, I made everything lowercase, removed numbers and punctuation and stripped whitespace. I then removed stop words as these words do not carry semantic meaning or really any helpful information. stop words are needed for grammatical construction, but on their own, they are not helpful. Then, I stemmed the document so that words such as 'running' and 'run' can be treated as the same word. This also helps to reduce the number of features (i.e., words) in our model later on. From there, for each the train and test sets, I created a document term matrix and removed any sparse terms that have a count of zero in 95% of documents. Most likely those do not provide helpful information and only add to the complexity of the model (via the number of features). I then got the weighted tf-idf matrix based on these document term matrices for each the train and test set. 
+For this task, I first read in the train and test documents. Here, I read in using a reader function to read in the lines. For each file, I extracted the author names to later be used as the response variable for the classification model, and I cleaned the file names, which will be used as the primary key (i.e., unique row identifier). For the model, I decided to create a document term matrix (counts) and a tf-idf matrix for the train and test files separately. Because I decided on that, I first turned the train and test documents (separately) into corpora for text mining and further cleaning. For each corpus, I made everything lowercase, removed numbers and punctuation, and stripped whitespace. By making words lowercase, the tf-idf scores can be computed more accurately as the same word are not treated separately due to being lower or uppercase. For example, if not made lowercase, the words 'Run' and 'run' would be counted separately which is not how they should be. I then removed stop words as these words do not carry semantic meaning or really any helpful information. Stop words are needed for grammatical construction, but on their own in a tf-idf matrix, they act more as filler words, adding noise to our classification model later on. Then, I stemmed the document so that words such as 'running' and 'run' can be treated as the same word. This also helps to reduce the number of features (i.e., terms/words) in our model later on. From there, for each the train and test sets, I created a document term matrix and removed any sparse terms that have a count of zero in 95% of documents. Most likely those do not provide helpful information and only add to the complexity of the model (via the number of features). I then got the weighted tf-idf matrix based on these document term matrices for each the train and test set. 
 
 ### Analysis Explanation
 
-For the models, I considered the tf-idf matrix as the dataset (features) for the classification models to predict the author who wrote a given article. Each predictor is a term, and each value, is the tf-idf score of that term in any given document (i.e., the row).
+For the models, I considered the document term matrix (counts) and the tf-idf matrix as the data, where terms are the features for the classification models to predict the author who wrote a given article. Each predictor is a term, and each value, is the count or tf-idf score of that term in any given document (i.e., the row).
 
-First, I used a KNN classifier to do this. I then created a cosine distance matrix for the tf-idf weights and fit a KNN to training data (cosine distance matrix of the training data tf-idf weights). When applied to the test data (also converted to a cosine distance matrix of the test data), the model achieved an accuracy of 47% with the value of k, nearest neighbors, at 5. If one figures that a human has a 1/50 (or 2%) chance at correctly guessing the author, then this accuracy is much higher than the threshold and outperforms a random human guess. 
+First, I used a KNN classifier to do this. I created a cosine distance matrix for the tf-idf weights (which better captures actual distance) and fit a KNN to training data (cosine distance matrix of the training data tf-idf weights). When applied to the test data (also converted to a cosine distance matrix of the test data), the model achieved an accuracy of 48% with the value of k, nearest neighbors, at 5. If one figures that a human has a 1/50 (or 2%) chance at correctly guessing the author, then this accuracy is much higher than the threshold and outperforms a random human guess. 
 
-The next model I considered was a multinomial naive bayes model. I built the model using the tf-idf weights of the training data and a Laplace  smoothing factor of 1/number of terms. This model outperformed the KNN model at 59%. The Laplace  factor here accounts for a pseudo count of words that we did not seen in the training data, but we did see in the test data documents. In comparison to the KNN model, which did not add a pseudo count , this model outperforms, possibly explained by the inclusion of a pseudo count.
+The next model I considered was a multinomial naive bayes model. I built the model using the counts of the terms (not the tf-idf) and a Laplace smoothing factor of 1/number of terms. The Laplace factor here accounts for a pseudo count of words that we did not see in the training data, but we did see in the test data documents. This model achieved an accuracy of 57%, higher than the knn model. In comparison to the KNN model, which did not add a pseudo count, this model outperforms, possibly explained by the inclusion of a pseudo count.
 
-Predicting the author of an article is a difficult classification task. As explained above, when a tf-idf matrix is used in the model, where each feature is a term and each value is a tf-idf score of that term in the document, much better job at naming the author of an article over a random human guess is achieved Extensive data pre-processing techniques including cleaning non-word characters, removing stop words, and stemming words, refine the documents so that a more meaningful and helpful tf-idf matrix is constructed. 
+### Conclusions
+
+Predicting the author of an article is a difficult classification task. The best peforming model is a multinomial naive bayes model, at 57% accuracy, on term counts with a laplace smoothing factor of 1/number of terms. As explained above, this does a much better job at naming the author of an article over a random human guess. Extensive data pre-processing techniques are required which include cleaning non-word characters, removing stop words, and stemming words, to refine the documents so that a more meaningful and helpful document term and/or tf-idf matrix is constructed. 
 
 
+# Association rule mining
+
+```{r, echo=FALSE, include=FALSE}
+rm(list=ls())
+```
+
+```{r, echo=FALSE, include=FALSE}
+#read in data and put into a dataframe of one item per row, grouped by created transaction id
+groceries_data <- read.table("groceries.txt",sep="\n",header=F)
+groceries_df <- data.frame(groceries_data)
+colnames(groceries_df) <- c('grocery_item')
+groceries_df$id <- 1:nrow(groceries_df)
+groceries_list_df <- groceries_df %>%
+  separate_rows(grocery_item, id, sep=',', convert = TRUE)
+groceries_list_df <- data.frame(groceries_list_df)
+groceries_list_df[groceries_list_df==""] <- NA
+groceries_list_df <- groceries_list_df %>% drop_na()
+```
+
+```{r, echo=FALSE, include=FALSE}
+#put into arules format
+groceries_list_df$id <- factor(groceries_list_df$id)
+groceries <- split(x=groceries_list_df$grocery_item, f=groceries_list_df$id)
+groceries <- lapply(groceries, unique)
+groceries_trans <- as(groceries, "transactions")
+```
+
+```{r, echo=FALSE}
+groceries_list_df %>%
+  #group_by(grocery_item)
+  dplyr::count(grocery_item, sort = TRUE) %>% 
+  top_n(10, n) %>% 
+  ggplot(aes(x = reorder(grocery_item, n), y = n, fill = n < 1800)) +
+  scale_fill_manual(values=c("tomato", "gray"), guide = FALSE ) + 
+  geom_bar(stat = "identity") + 
+  theme(legend.position = "none", 
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1),
+        # Change axis line
+        #plot.title.position = "plot", 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold")) +
+  coord_flip() +
+  labs(title="Milk, Vegetables, and Bread Are The Most Frequently Bought", 
+       subtitle="But, what are they bought with? For that, we turn to Association Rule Mining",
+       y='number of times individual grocery item was bought', 
+       x='')
+```
 
 
+There are 169 unique grocery items purchased with a total of 43,367 non-unique grocery items purchased in 9835 transactions. From this we can tell that we have a good amount of grocery items that appear together in many baskets in a lot of combinations. In the plot above, we can see which individual items are the most popular. To know what items they, and others not shown, are bought with, we must use Association Rule Mining. 
+
+For this Association Rule Mining model, I set the support to be at .005 so that we can capture relatively infrequent items in baskets with other items and not just focusing on the most popular items as that may not be as insightful, but at the same time, we are not capturing very rare items. For the confidence level, I selected a value of 0.2 to uncover many rules, but also to keep out the less informative and more rare rules that are not helpful. Because many people buy a number of groceries in one basket, I set the max length to four to represent this.
+
+
+```{r, echo=FALSE, include=FALSE}
+#run the 'apriori' algorithm
+grocery_rules = apriori(groceries_trans, 
+	parameter=list(support=.005, confidence=.2, maxlen=4))
+```
+
+```{r, echo=FALSE}
+inspect(head(grocery_rules, 10))
+```
+
+873 rules are generated from this model and the first ten are shown above, but which rules show what items are the most likely to be bought together? Because the lift measure adjusts for statistical dependence and the popularity of the items in the rule, we look to see for those that have a high, positive value (positive indicating likelihood of occurrence in a basket). The most likely rule is citrus fruit, other vegetables, whole milk appearing with root vegetables in a basket. So, we do see some of the individually most individually frequently purchased items in the top rule (other vegetables and whole milk). 
+
+```{r, echo=FALSE}
+inspect(head(sort(grocery_rules, by='lift'), 10))
+```
+
+```{r, echo=FALSE, results='hide',fig.keep='all', message=FALSE}
+#plot(grocery_rules, measure = c("support", "lift"), shading = "confidence")
+plot(grocery_rules, method='two-key plot') +
+  theme(#legend.title = element_text("Number of Items In Basket"), 
+        panel.background = element_blank(),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1),
+        # Change axis line
+        #plot.title.position = "plot", 
+        axis.line = element_line(colour = "black"), 
+        plot.title = element_text(face = "bold")) +
+  labs(title="Most High-Confidence Rules Have Many Items", 
+       subtitle="Rules with just two items in a basket tend to have higher support than those with 3 or 4",
+       y='confidence level', 
+       x='support', 
+       colour = "# Items in Basket") +
+  ggplot2::annotate(
+    geom = "curve", x = 0.21, y = 0.27, xend = 0.25, yend = 0.25,
+    curvature = .3, color='#f8766d', arrow = arrow(length = unit(2, "mm"))) +
+  ggplot2::annotate("text", x = 0.15, y = 0.3, 
+           label = 'whole milk is the only rule where\nan item is bought by itself', hjust = "left",
+           color='#f8766d', size = 3, fontface=2)
+```
+
+To briefly recap, I applied an Association Rule Mining algorithm on 169 unique grocery items pruchased with a total of 43,367 non-unqiue grocery items purchased in 9835 transactions. I used a support of .005 and a confidence level of 0.2 which generated 872 rules, of which most had more than 2 items in a basket. The highest among them in terms of lift is citrus fruit, other vegetables, whole milk appearing with root vegetables in a basket. We see items in this rule that are among the most frequently purchased items (other vegetables and whole milk). 
+
+From these rules we can recommend the following:
+* Place citrus fruit, other vegetables, and whole milk all near each other and near root vegetables
+* Place butter and vegetables close together and by sour cream
+* Place herbs next to root vegetables 
 
